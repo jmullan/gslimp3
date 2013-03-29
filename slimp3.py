@@ -1,5 +1,3 @@
-# -*- coding: latin1 -*-
-#
 # Copyright (C) 2005 Gerome Fournier <jef(at)foutaise.org>
 #
 # This program is free software; you can redistribute it and/or modify
@@ -37,7 +35,6 @@ import sys
 import math
 import time
 import fcntl
-import posix
 import signal
 import popen2
 import socket
@@ -46,7 +43,7 @@ import struct
 import ossaudiodev
 import cStringIO
 
-_CLIENT_PORT = 88888
+_CLIENT_PORT = 48888
 _RECV_BUF_SIZE = 65536
 
 _IR_CODES = {
@@ -82,7 +79,7 @@ _IR_CODES = {
 }
 
 def get_mac_addr(ifname):
-	"Return the MAC address of interface 'ifname'" 
+	"Return the MAC address of interface 'ifname'"
 	SIOCGIFHWADDR = 0x8927 # magic number
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	ifr = ifname + '\0'*(32-len(ifname))
@@ -139,7 +136,7 @@ class RingBuffer:
 class Player:
 	def __init__(self, player_cmd):
 		"""Instantiate a MPEG decoder
-		
+
 		This class is mainly a wrapper around an external MPEG player,
 		which will read the MPEG stream from STDIN
 		"""
@@ -183,7 +180,7 @@ class Player:
 	def has_something_to_eat(self):
 		"Is there any data left for the player?"
 		return not self._buffer.is_empty()
-	
+
 	def eat(self):
 		"Let the MPEG decoder eat a few bytes"
 		if self._is_running():
@@ -207,7 +204,7 @@ class Player:
 class Packet:
 	def __init__(self, string):
 		"""Instantiate a Slimp3 packet
-		
+
 		Instance attributes:
 
 		  self.header: packet header
@@ -226,9 +223,9 @@ class Slimp3Client:
 
 	def __init__(self):
 		"""Instanciate a Slimp3 client
-		
+
 		Instance attributes:
-		
+
 		  self.lcddata_fd:
 		    file descriptor where LCD datas packets can be fetched. The
 			first byte gives the length of the following packet.
@@ -245,7 +242,7 @@ class Slimp3Client:
 
 	def set_player(self, player_cmd):
 		"""Set the player used to play the mpeg stream
-		
+
 		The player should read the stream on STDIN
 		"""
 		self._player = Player(player_cmd)
@@ -263,7 +260,7 @@ class Slimp3Client:
 
 	def set_server_port(self, port):
 		"""Set the Slimp3 server port
-		
+
 		If the value is not valid, a ValueError exception is raised
 		"""
 		try:
