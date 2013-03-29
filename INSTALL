@@ -1,0 +1,23 @@
+INSTALLING gslimp3
+==================
+
+Requirements
+------------
+
+  * python
+  * python-gtk2
+  * python-glade2
+  * madplay (or another MPEG player)
+  * an up and running SlimServer accessible on your network. SlimServer is
+    downloadable from the Slim Devices web site:
+    http://www.slimdevices.com/
+
+Install
+-------
+
+  $ su -c "make install"
+
+Run
+---
+
+  $ gslimp3

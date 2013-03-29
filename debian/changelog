@@ -1,0 +1,38 @@
+gslimp3 (0.6) unstable; urgency=low
+
+  * New checkbox in preferences to decide if gslimp3 should
+    control PCM mixer or not.
+
+ -- Gerome Fournier <jefke@free.fr>  Fri, 15 Sep 2006 22:58:13 +0200
+
+gslimp3 (0.5) unstable; urgency=low
+
+  * Better error handling when setting volume level.
+  * Cosmetic changes.
+
+ -- Gerome Fournier <jefke@free.fr>  Tue,  2 May 2006 20:00:21 +0200
+
+gslimp3 (0.4) unstable; urgency=low
+
+  * Better select policy when no more data are available. 
+
+ -- Gerome Fournier <jefke@free.fr>  Wed, 25 Jan 2006 23:46:12 +0100
+
+gslimp3 (0.3) unstable; urgency=low
+
+  * Brightness support added. 
+
+ -- Gerome Fournier <jefke@free.fr>  Sun,  8 Jan 2006 19:41:24 +0100
+
+gslimp3 (0.2) unstable; urgency=low
+
+  * Correct minor bug. 
+
+ -- Gerome Fournier <jefke@free.fr>  Thu,  5 Jan 2006 19:29:30 +0100
+
+gslimp3 (0.1) unstable; urgency=low
+
+  * Initial Release.
+
+ -- Gerome Fournier <jefke@free.fr>  Sat,  8 Oct 2005 16:23:53 +0200
+

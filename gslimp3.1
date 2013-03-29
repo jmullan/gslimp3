@@ -1,0 +1,78 @@
+.TH GSLIMP3 1 "October 2005" "gslimp3 @VERSION@" "User Commands"
+.SH NAME
+gslimp3 \- SLIMP3 player emulator
+.SH SYNOPSIS
+.B gslimp3
+.SH DESCRIPTION
+.B gslimp3
+is a SLIMP3 player emulator, using the SLIMP3 Client Protocol.
+.PP
+.B gslimp3
+needs a MPEG player to play the MPEG stream. This player must be specified
+in the application preferences. It will receive the MPEG stream from 
+its standard input.
+.PP
+madplay is a good candidate to fullfill this task:
+.IP
+madplay -Q -
+.PP
+If esd is used, then use this instead:
+.IP
+madplay --output=esd:localhost -Q -
+.SH SHORTCUTS
+The following shortcuts are used to simulate keys of the Squeezebox
+remote controler:
+.TS
+l l
+____
+lB l.
+Keyboard Key	Squeezebox remote controller key
+0	0
+1	1
+2	2
+3	3
+4	4
+5	5
+6	6
+7	7
+8	8
+9	9
+UP	Up
+RIGHT	Right
+DOWN	Down
+LEFT	Left
+HOME	Now playing
+PAGE UP	Volume up
+PAGE DOWN	Volume down
+ENTER	Play
+SPACE	Pause
+[	Rew
+]	Fwd
++	Add
+/	Search
+A	Sleep
+B	Brightness
+F	Size
+R	Repeat
+S	Shuffle
+.TE
+
+Some mouse events on the LCD display are also used:
+.TS
+l l
+____
+lB l.
+Mouse event	Squeezebox remote controller key
+Left button pressed	Now playing
+Mouse wheel up	Volume up
+Mouse wheel down	Volume down
+.TE
+.SH TODO
+Add LIRC support
+.SH AUTHOR
+Written by Gerome Fournier <jef@foutaise.org>.
+.SH COPYRIGHT
+Copyright \(co 2005 Gerome Fournier.
+.br
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

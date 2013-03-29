@@ -1,0 +1,12 @@
+Source: gslimp3
+Section: sound
+Priority: optional
+Maintainer: Gerome Fournier <jef@foutaise.org>
+Build-Depends: debhelper (>= 4.0.0), python-dev
+Standards-Version: 3.6.1
+
+Package: gslimp3
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}, python-gtk2, python-glade2, madplay
+Description: SLIMP3 player emulator
+ gslimp3 implements a SLIM3 emulator, using the SLIMP3 Client Protocol.

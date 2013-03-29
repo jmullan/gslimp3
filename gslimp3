@@ -1,0 +1,677 @@
+#!/usr/bin/python
+# -*- coding: latin1 -*-
+#
+# Copyright (C) 2005 Gerome Fournier <jef(at)foutaise.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+"SLIMP3 player emulator written in python"
+
+import os
+import gobject
+import gtk
+import gtk.glade
+import sys
+import signal
+import slimp3
+import struct
+import socket
+import ConfigParser
+import time
+
+_CHARS_FILENAME = "@SHARE_DIR@/lcd_chars.txt"
+_GLADE_FILENAME = "@SHARE_DIR@/gslimp3.glade"
+
+_KEY_MAPPING = {
+	"0": '0',
+	"1": '1',
+	"2": '2',
+	"3": '3',
+	"4": '4',
+	"5": '5',
+	"6": '6',
+	"7": '7',
+	"8": '8',
+	"9": '9',
+	"KP_0": '0',
+	"KP_1": '1',
+	"KP_2": '2',
+	"KP_3": '3',
+	"KP_4": '4',
+	"KP_5": '5',
+	"KP_6": '6',
+	"KP_7": '7',
+	"KP_8": '8',
+	"KP_9": '9',
+	"UP": 'UP',
+	"RIGHT": 'RIGHT',
+	"LEFT": 'LEFT',
+	"DOWN": 'DOWN',
+	"PAGE_UP": 'VOLUP',
+	"PAGE_DOWN": 'VOLDOWN',
+	"HOME": 'NOW_PLAYING',
+	"RETURN": 'PLAY',
+	"KP_ENTER": 'PLAY',
+	"SPACE": 'PAUSE',
+	"BRACKETLEFT": 'REW',
+	"BRACKETRIGHT": 'FWD',
+	"PLUS": 'ADD',
+	"KP_ADD": 'ADD',
+	"SLASH": 'SEARCH',
+	"KP_DIVIDE": 'SEARCH',
+	"A": 'SLEEP',
+	"B": 'BRIGHTNESS',
+	"F": 'SIZE',
+	"R": 'REPEAT',
+	"S": 'SHUFFLE',
+}
+
+class LCDWidget:
+	"GTK+ LCD Widget"
+
+	def __init__(self, widget, rows, cols):
+		"Instantiate a LCD widget"
+		self.rows = rows
+		self.cols = cols
+		self._area = widget
+		self._pix = None
+		self._table = {}
+		self._area.connect("configure-event", self._configure_cb)
+		self._area.connect("expose-event", self._expose_cb)
+
+	def set_zoom_factor(self, factor):
+		"Set the zoom factor"
+		self._factor = factor
+		self._border = 5
+		self._cborder = 3*factor
+		self._cwidth = 9*factor
+		self._cheight = 13*factor
+		self._width = 2*self._border + \
+				(self._cwidth+self._cborder)*self.cols + self._cborder
+		self._height = 2*self._border + \
+				(self._cheight+self._cborder)*self.rows + self._cborder
+		self._area.set_size_request(self._width, self._height)
+
+
+	def refresh(self):
+		"Refresh the LCD widget"
+		self._area.queue_draw_area(0, 0, self._width, self._height)
+
+	def draw_char(self, row, col, charindex):
+		"""Draw the character stored at position 'charindex' in the internal
+		   character definition table, on the LCD widget
+		"""
+		if not self._pix:
+			return
+		x = col * (self._cwidth+self._cborder) + self._border + self._cborder
+		y = row * (self._cheight+self._cborder) + self._border + self._cborder
+		self._pix.draw_drawable(self._back, self._table[charindex], \
+				0, 0, x, y, self._cwidth, self._cheight)
+
+	def set_brightness_percentage(self, percentage):
+		fg_colors = {
+			100: "#00ff96",
+			75: "#00d980",
+			50: "#00b269",
+			25: "#008c53",
+			0: "#303030"
+		}
+		if percentage not in fg_colors.keys():
+			return
+		if hasattr(self, "_brightness_percentage") \
+			and self._brightness_percentage == percentage:
+			return
+		self._brightness_percentage = percentage
+		self._set_colors(["#000000", "#303030", fg_colors[percentage]])
+		self._load_font_definition()
+
+	def clear(self):
+		"Clear the LCD display"
+		for row in range(self.rows):
+			for col in range(self.cols):
+				self.draw_char(row, col, 32)
+		self.refresh()
+
+	def set_button_press_event_cb(self, cb):
+		"Setup a callback when a mouse button is pressed on the LCD display"
+		self._area.add_events(gtk.gdk.BUTTON_PRESS_MASK)
+		self._area.connect("button_press_event", cb)
+
+	def set_scroll_event_cb(self, cb):
+		"Setup a callback when wheel mouse is used on the LCD display"
+		self._area.connect("scroll_event", cb)
+
+	def create_char(self, charindex, shape):
+		"""Insert a new char in the character table definition,
+		   at position 'charindex', based on 'shape'
+		"""
+		pix = gtk.gdk.Pixmap(self._area.window, self._cwidth, self._cheight)
+		pix.draw_rectangle(self._back, True, 0, 0, self._cwidth, self._cheight)
+		for x in range(5):
+			for y in range(7):
+				pix.draw_rectangle(self._charbg, True, \
+					x*2*self._factor, y*2*self._factor, \
+					self._factor, self._factor)
+		for index in range(35):
+			if shape[index] == "1":
+				row = index / 5
+				col = index - row*5
+				pix.draw_rectangle(self._charfg, True, \
+					col*2*self._factor, row*2*self._factor, \
+					self._factor, self._factor)
+		self._table[charindex] = pix
+
+	def print_line(self, string):
+		"Print a single line on the LCD display"
+		self.clear()
+		for i in range(len(string[:self.cols])):
+			self.draw_char(0, i, ord(string[i]))
+		self.refresh()
+
+	def _configure_cb(self, widget, event):
+		x, y, width, height = widget.get_allocation()
+		self._pix = gtk.gdk.Pixmap(widget.window, width, height)
+		self.set_brightness_percentage(100)
+		self._pix.draw_rectangle(self._back, True, 0, 0, width, height)
+		self._load_font_definition()
+		self.clear()
+		return True
+
+	def _expose_cb(self, widget, event):
+		if self._pix:
+			widget.window.draw_drawable(self._back, self._pix, 0, 0, 0, 0, \
+					self._width, self._height)
+		return False
+
+	def _set_colors(self, colors):
+		for widget, color in zip(["_back", "_charbg", "_charfg"], colors):
+			exec "self.%s = gtk.gdk.GC(self._pix)" % widget
+			exec "self.%s.set_rgb_fg_color(gtk.gdk.color_parse('%s'))" \
+				% (widget, color)
+
+	def _load_font_definition(self):
+		try:
+			file = open(_CHARS_FILENAME)
+		except IOError:
+			print >>sys.stderr, "Unable to open font characters definition '%s'" \
+					% _CHARS_FILENAME
+			sys.exit(1)
+		index = 1
+		shape = ""
+		for line in file.readlines():
+			line = line.rstrip()
+			if not line or line[0] == "#":
+				continue
+			if index == 1:
+				char_index = int(line, 16)
+			else:
+				shape = ''.join([shape, line])
+			index += 1
+			if index == 9:
+				self.create_char(char_index, shape)
+				index = 1
+				shape = ""
+
+class Slimp3LCD(LCDWidget):
+	"An LCD display abble to parse Slimp3 LCD display packets"
+	_CODE_DELAY = 0
+	_CODE_CMD = 2
+	_CODE_DATA = 3
+
+	_CMD_CLEAR = 0
+	_CMD_HOME = 1
+	_CMD_MODE = 2
+	_CMD_DISPLAY = 3
+	_CMD_SHIFT = 4
+	_CMD_FUNC_SET = 5
+	_CMD_CG_ADDR = 6
+	_CMD_DD_ADDR = 7
+	
+	def parse_lcd_packet(self, lcd_packet):
+		"Parse a SLIMP3 LCD packet"
+		self.addr = 0
+		self.shift = 1
+		i = 0
+		while i < len(lcd_packet)/2:
+			chunk = socket.ntohs(struct.unpack("H", lcd_packet[i*2:i*2+2])[0])
+			code = (chunk & 0xFF00) >> 8
+			cmd = chunk & 0x00FF
+			if code == self._CODE_DELAY:
+				pass
+			elif code == self._CODE_CMD:
+				i += self._handle_command(cmd, lcd_packet[i*2:])
+			elif code == self._CODE_DATA:
+				row = self.addr / self.cols
+				col = self.addr - self.cols*row
+				self.draw_char(row, col, cmd)
+				self._move_cursor(self.shift)
+			i += 1
+		self.refresh()
+
+	def _handle_command(self, cmd, string):
+		"Handle LCD commands"
+		if cmd >> self._CMD_CLEAR == 1:
+			self.clear()
+			self.addr = 0
+			self.shift = 1
+		elif cmd >> self._CMD_HOME == 1:
+			self.addr = 0
+		elif cmd >> self._CMD_MODE == 1:
+			if cmd & 2 != 0:
+				self.shift = 1
+			else:
+				self.shift = -1
+		elif cmd >> self._CMD_DISPLAY == 1:
+			pass
+		elif cmd >> self._CMD_SHIFT == 1:
+			if cmd & 0x04:
+				self.move_cursor(-1)
+			else:
+				self.move_cursor(1)
+		elif cmd >> self._CMD_FUNC_SET == 1:
+			return self._handle_function_set(cmd, string[2:4])
+		elif cmd >> self._CMD_CG_ADDR == 1:
+			return self._handle_char_definition(cmd, string[2:16])
+		elif cmd >> self._CMD_DD_ADDR == 1:
+			pass
+		return 0
+
+	def _handle_function_set(self, cmd, string):
+		"Handle Brightness stuff"
+		if ord(string[0]) == 3:
+			self.set_brightness_percentage(100 - 25 * ord(string[1]))
+			return 1
+		else:
+			return 0
+		
+	def _handle_char_definition(self, char, string):
+		"Create a char as defined by 'string'"
+		if len(string) != 14:
+			print >>sys.stderr, "Character definition has a wrong size!"
+			return 0
+		shape = [' '] * 35
+		index = (0x3f & char) >> 3;
+		for i in range(7):
+			line = ord(string[2*i + 1])
+			for j in range(5):
+				if 1 & (line >> (4 - j)):
+					shape[i*5+j] = "1"
+		self.create_char(index, shape)
+		# defining a new char consume 7 extra command codes
+		return 7
+
+	def _move_cursor(self, shift):
+		self.addr += shift
+		if self.addr < 0:
+			self.addr = 0
+		elif self.addr > self.rows * self.cols - 1:
+			self.addr = self.rows * self.cols - 1
+
+class Window:
+	"Base class to deal with glade based windows"
+
+	def __init__(self, windowname):
+		"Instantiate a window from the glade file"
+		self._wTree = gtk.glade.XML(_GLADE_FILENAME, windowname)
+		self._window = self._wTree.get_widget(windowname)
+		self._setup_callbacks()
+	
+	def _setup_callbacks():
+		pass
+
+class Slimp3Gui(Window):
+	"Main GUI"
+
+	def __init__(self):
+		"Instantiate the application"
+		Window.__init__(self, "gslimp3")
+		self._window.hide()
+		self._setup_widgets()
+
+		self._prefs = Preferences()
+		self._prefs.load()
+		self._prefs.set_modified_server_cb(self._modified_server_cb)
+		self._prefs.set_modified_player_cb(self._modified_player_cb)
+		self._prefs.set_modified_volume_control_cb(self._modified_volume_control_cb)
+		self._set_zoom_factor(self._prefs.zoom_factor)
+
+		self._slimp3 = slimp3.Slimp3Client()
+		self._slimp3.set_player(self._prefs.player_cmdline)
+		self._slimp3.set_volume_control(self._prefs.volume_control)
+		if self._prefs.use_broadcast:
+			self._slimp3.set_server('255.255.255.255')
+		else:
+			self._slimp3.set_server(self._prefs.server_hostname)
+		self._slimp3.set_server_port(self._prefs.server_port)
+		gobject.io_add_watch(self._slimp3.lcddata_fd, gobject.IO_IN,
+				self._handle_lcddata)
+
+	def run(self):
+		"Start the application"
+		try:
+			signal.signal(signal.SIGINT, self._quit)
+			signal.signal(signal.SIGTERM, self._quit)
+			self._window.show()
+			if self._prefs.use_broadcast:
+				self.lcd_display.print_line("Broadcasting...")
+			else:
+				self.lcd_display.print_line("Contacting server...")
+			self._slimp3.connect()
+			gtk.main()
+		except KeyboardInterrupt:
+			raise
+		except:
+			raise
+
+	def _modified_player_cb(self, player_cmdline):
+		self._slimp3.disconnect()
+		self._slimp3.set_player(player_cmdline)
+		self._slimp3.connect()
+
+	def _modified_server_cb(self, use_broadcast, server_hostname, server_port):
+		self._slimp3.disconnect()
+		if use_broadcast:
+			self.lcd_display.print_line("Broadcasting...")
+			self._slimp3.set_server('255.255.255.255')
+		else:
+			self.lcd_display.print_line("Contacting server...")
+			self._slimp3.set_server(server_hostname)
+		self._slimp3.set_server_port(server_port)
+		self._slimp3.connect()
+
+	def _modified_volume_control_cb(self, volume_control):
+		self._slimp3.disconnect()
+		self._slimp3.set_volume_control(volume_control)
+		self._slimp3.connect()
+
+	def _quit(self, *args):
+		self._slimp3.disconnect()
+		gtk.main_quit()
+
+	def _on_about(self, *args):
+		About()
+
+	def _on_preferences(self, *args):
+		self._prefs.show()
+
+	for _cmd in ["play", "pause", "fwd", "rew", "power"]:
+		exec "def _on_%s(self, *args):\n\
+				self._slimp3.cmd_%s()" % (_cmd, _cmd)
+
+	def _on_zoom_in(self, *args):
+		self._set_zoom_factor(2)
+
+	def _on_zoom_out(self, *args):
+		self._set_zoom_factor(1)
+
+	def _key_pressed(self, widget, event):
+		keyname = gtk.gdk.keyval_name(event.keyval)
+		if not keyname:
+			return
+		else:
+			keyname = keyname.upper()
+		code = _KEY_MAPPING.get(keyname, False)
+		if code:
+			exec "self._slimp3.cmd_%s()" % code.lower()
+			return True
+		else:
+			return False
+
+	def _handle_lcddata(self, lcddata_fd, condition):
+		str = os.read(lcddata_fd, struct.calcsize("i"))
+		data_length = struct.unpack("i", str)[0]
+		data = os.read(lcddata_fd, data_length)
+		self.lcd_display.parse_lcd_packet(data)
+		return True
+
+	def _setup_widgets(self):
+		widget = self._wTree.get_widget('lcddisplay')
+		self._menu_edit_zoom_in = self._wTree.get_widget('zoom_in')
+		self._menu_edit_zoom_out = self._wTree.get_widget('zoom_out')
+		self.lcd_display = Slimp3LCD(widget, 2, 40)
+		def button_press_cb(widget, event):
+			self._slimp3.cmd_now_playing()
+			return True
+		def scroll_event_cb(widget, event):
+			if event.direction == gtk.gdk.SCROLL_UP:
+				self._slimp3.cmd_volup()
+			elif event.direction == gtk.gdk.SCROLL_DOWN:
+				self._slimp3.cmd_voldown()
+			return True
+		self.lcd_display.set_button_press_event_cb(button_press_cb)
+		self.lcd_display.set_scroll_event_cb(scroll_event_cb)
+
+	def _setup_callbacks(self):
+		HANDLERS_AND_METHODS = {
+			"gtk_main_quit": self._quit,
+			"on_about": self._on_about,
+			"on_preferences": self._on_preferences,
+			"on_play": self._on_play,
+			"on_pause": self._on_pause,
+			"on_fwd": self._on_fwd,
+			"on_rew": self._on_rew,
+			"on_power": self._on_power,
+			"on_zoom_in": self._on_zoom_in,
+			"on_zoom_out": self._on_zoom_out,
+		}
+		self._wTree.signal_autoconnect(HANDLERS_AND_METHODS)
+		self._window.connect("key_press_event", self._key_pressed)
+
+	def _set_zoom_factor(self, factor):
+		if factor not in [1, 2]:
+			return
+		self.lcd_display.set_zoom_factor(factor)
+		self._prefs.save_zoom_factor(factor)
+		if factor == 1:
+			self._menu_edit_zoom_in.set_sensitive(True)
+			self._menu_edit_zoom_out.set_sensitive(False)
+		else:
+			self._menu_edit_zoom_in.set_sensitive(False)
+			self._menu_edit_zoom_out.set_sensitive(True)
+
+class About(Window):
+	"About Window"
+
+	def __init__(self):
+		"Instantiate the window"
+		Window.__init__(self, "about")
+
+	def on_close(self, *args):
+		"Close the window"
+		self._window.destroy()
+
+	def _setup_callbacks(self):
+		HANDLERS_AND_METHODS = {
+			"on_close": self.on_close,
+		}
+		self._wTree.signal_autoconnect(HANDLERS_AND_METHODS)
+
+class Preferences(Window):
+	"""Handle user preferences
+
+	Instance attributes:
+
+	  self.use_broadcast: boolean value 
+	  self.server_hostname: hostname of the slimp3 server
+	  self.server_port: UDP port on which the slimp3 server listens
+	  self.player_cmdline: command line of the backend mpeg player
+	  self.zoom_factor: zoom factor of the LCD display
+	"""
+
+	def __init__(self):
+		"Instantiate the window"
+		self._modified_server_cb = None
+		self._modified_player_cb = None
+		self._modified_volume_control_cb = None
+		self._cfgfile = os.path.expanduser("~/.gslimp3rc")
+		self._cp = ConfigParser.ConfigParser()
+		self.use_broadcast = False
+		self.server_hostname = ""
+		self.server_port = ""
+		self.player_cmdline = ""
+		self.zoom_factor = 1
+		self.volume_control = True
+
+	def load(self):
+		"Load the preferences from the preference file"
+		try:
+			file = open(self._cfgfile)
+			self._cp.readfp(file)
+			file.close()
+			self.use_broadcast = self._cp.getboolean("global", "use_broadcast")
+			self.server_hostname = self._cp.get("global", "server_hostname")
+			self.server_port = self._cp.getint("global", "server_port")
+			self.player_cmdline = self._cp.get("global", "player_cmdline")
+			self.zoom_factor = self._cp.getint("global", "zoom_factor")
+			self.volume_control = self._cp.getboolean("global", "volume_control")
+		except IOError:
+			print >>sys.stderr, "Can't open config file '%s'." % self._cfgfile
+			print >>sys.stderr, "Use default values"
+			self._reset()
+			self.load()
+		except:
+			print >>sys.stderr, "Parsing error while reading config file."
+			print >>sys.stderr, "Use default values"
+			self._reset()
+			self.load()
+
+	def show(self):
+		"Show the window"
+		Window.__init__(self, "preferences")
+		self._radio_use_broadcast = self._wTree.get_widget('radio_use_broadcast')
+		self._radio_static = self._wTree.get_widget('radio_static')
+		self._entry_player_cmdline = self._wTree.get_widget('entry_player_cmdline')
+		self._check_volume_control = self._wTree.get_widget('check_volume_control')
+		for prefix in ["label", "entry"]:
+			for name in ["server_hostname", "server_port"]:
+				exec "self._%s_%s = self._wTree.get_widget('%s_%s')" \
+						% (prefix, name, prefix, name)
+		self.load()
+		if self.use_broadcast:
+			self._radio_use_broadcast.set_active(True)
+		else:
+			self._radio_static.set_active(True)
+		self._entry_server_hostname.set_text(self.server_hostname)
+		self._entry_server_port.set_text(str(self.server_port))
+		self._entry_player_cmdline.set_text(self.player_cmdline)
+		self._check_volume_control.set_active(self.volume_control)
+		self._update_sensitive()
+
+	def save_zoom_factor(self, factor):
+		"Save the zoom factor in the preference file"
+		self.load()
+		self._cp.set("global", "zoom_factor", "%d" % factor)
+		self._save_cfgfile()
+
+	def set_modified_server_cb(self, cb):
+		"Setup a callback when the server settings are modified"
+		self._modified_server_cb = cb
+
+	def set_modified_player_cb(self, cb):
+		"Setup a callback when the backend player is modified"
+		self._modified_player_cb = cb
+
+	def set_modified_volume_control_cb(self, cb):
+		"Setup a callback when the volume control is modified"
+		self._modified_volume_control_cb = cb
+
+	def _setup_callbacks(self):
+		HANDLERS_AND_METHODS = {
+			"on_toggled": self._on_toggled,
+			"on_close": self._on_close,
+			"on_cancel": self._on_cancel,
+			"on_ok": self._on_ok,
+		}
+		self._wTree.signal_autoconnect(HANDLERS_AND_METHODS)
+
+	def _on_toggled(self, button):
+		self._update_sensitive()
+
+	def _update_sensitive(self):
+		sensitive = self._radio_static.get_active()
+		for prefix in ["label", "entry"]:
+			for name in ["server_hostname", "server_port"]:
+				exec "self._%s_%s.set_sensitive(%s)" % (prefix, name, sensitive)
+
+	def _on_close(self, *args):
+		self._window.destroy()
+
+	def _on_cancel(self, *args):
+		self._window.destroy()
+
+	def _on_ok(self, *args):
+		self._save()
+		self._window.destroy()
+
+	def _save(self):
+		try:
+			server_port = int(self._entry_server_port.get_text())
+			if server_port < 0 or server_port > 65535:
+				raise ValueError
+		except ValueError:
+			print >>sys.stderr, "Invalid port number: %s" % server_port
+			return
+		use_broadcast = self._radio_use_broadcast.get_active()
+		server_hostname = self._entry_server_hostname.get_text()
+		player_cmdline = self._entry_player_cmdline.get_text().rstrip()
+		volume_control = self._check_volume_control.get_active()
+
+		if (use_broadcast != self.use_broadcast 
+			or server_hostname != self.server_hostname
+			or server_port != self.server_port) and self._modified_server_cb:
+			self._modified_server_cb(use_broadcast, server_hostname, server_port)
+
+		if player_cmdline != self.player_cmdline and self._modified_player_cb:
+			self._modified_player_cb(player_cmdline)
+
+		if volume_control != self.volume_control and self._modified_volume_control_cb:
+			self._modified_volume_control_cb(volume_control)
+
+		for field in ["use_broadcast", "server_hostname",
+					"server_port", "player_cmdline", "volume_control"]:
+			exec "self.%s = %s" % (field, field)
+			exec "self._cp.set(\"global\", \"%s\", self.%s)" % (field, field)
+		self._save_cfgfile()
+
+	def _save_cfgfile(self):
+		try:
+			file = open(self._cfgfile, 'w')
+			self._cp.write(file)
+			file.close()
+		except:
+			print >>sys.stderr, "Can't save preferences in '%s'." % self._cfgfile
+
+	def _reset(self):
+		file = open(self._cfgfile, "w")
+		file.write("""\
+[global]
+use_broadcast = False
+server_hostname = localhost
+server_port = 3483
+player_cmdline = madplay -Q -
+zoom_factor = 1
+volume_control = 1
+""")
+		file.close()
+
+if __name__ == "__main__":
+	if len(sys.argv) > 1:
+		print >>sys.stderr, "Usage: %s\nSlimp3 client written in python." \
+				% sys.argv[0]
+		sys.exit(1)
+	app = Slimp3Gui()
+	app.run()
+
+# vim: ts=4 sw=4 noet

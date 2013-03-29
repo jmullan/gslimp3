@@ -1,0 +1,2 @@
+?package(gslimp3):needs="X11" section="Apps/Sound"\
+  title="gslimp3" command="/usr/bin/gslimp3"
